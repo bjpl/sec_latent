@@ -1,0 +1,481 @@
+{
+  "dashboard": {
+    "title": "SEC Filing Analysis - Performance Overview",
+    "tags": ["performance", "slo", "sec-latent"],
+    "timezone": "utc",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Response Time (P50, P95, P99)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "ms", "label": "Response Time"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [200], "type": "gt"},
+              "operator": {"type": "and"},
+              "query": {"params": ["B", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "5m",
+          "frequency": "1m",
+          "handler": 1,
+          "message": "API P95 response time exceeded 200ms threshold",
+          "name": "High API Response Time",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Requests Per Second",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[1m]))",
+            "legendFormat": "Total RPS",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"2..\"}[1m]))",
+            "legendFormat": "2xx Success",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m]))",
+            "legendFormat": "5xx Errors",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/sec"}
+        ],
+        "thresholds": [
+          {"value": 1000, "colorMode": "custom", "fill": false, "line": true, "op": "gt"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(redis_keyspace_hits_total) / (sum(redis_keyspace_hits_total) + sum(redis_keyspace_misses_total)) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {"values": false, "calcs": ["lastNotNull"]},
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 80, "color": "yellow"},
+                {"value": 95, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Error Rate",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {"values": false, "calcs": ["lastNotNull"]},
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 0.1, "color": "yellow"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Database Query Time (P95)",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket[5m])) by (le)) * 1000",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {"values": false, "calcs": ["lastNotNull"]},
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Active Pod Count",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "count(up{job=\"sec-latent-backend\"})",
+            "legendFormat": "Backend Pods",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 7,
+        "title": "CPU Utilization by Pod",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"sec-latent\",pod=~\"sec-latent-backend.*\"}[5m])) by (pod) * 100",
+            "legendFormat": "{{pod}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "CPU %", "max": 100}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [80], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "for": "5m",
+          "message": "High CPU utilization detected",
+          "name": "High CPU Alert"
+        }
+      },
+      {
+        "id": 8,
+        "title": "Memory Utilization by Pod",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(container_memory_usage_bytes{namespace=\"sec-latent\",pod=~\"sec-latent-backend.*\"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace=\"sec-latent\",pod=~\"sec-latent-backend.*\"}) by (pod) * 100",
+            "legendFormat": "{{pod}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Memory %", "max": 100}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Celery Queue Length",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "celery_queue_length{queue=\"sec_analysis\"}",
+            "legendFormat": "Queue: {{queue}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Tasks in Queue"}
+        ],
+        "thresholds": [
+          {"value": 100, "colorMode": "critical"}
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Filing Processing Rate",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(celery_tasks_completed_total{task=\"process_filing\"}[5m]) * 60",
+            "legendFormat": "Filings/minute",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Filings/min"}
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Database Connections",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 28, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends{datname=\"sec_filings\"}",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "pg_settings_max_connections",
+            "legendFormat": "Max Connections",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Connections"}
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Redis Memory Usage",
+        "type": "graph",
+        "gridPos": {"x": 8, "y": 28, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes / redis_memory_max_bytes * 100",
+            "legendFormat": "Memory Usage %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Memory %", "max": 100}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [85], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "type": "query"
+            }
+          ],
+          "for": "5m",
+          "message": "Redis memory usage exceeds 85%",
+          "name": "High Redis Memory"
+        }
+      },
+      {
+        "id": 13,
+        "title": "WebSocket Connections",
+        "type": "stat",
+        "gridPos": {"x": 16, "y": 28, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "websocket_connections_active",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1500, "color": "yellow"},
+                {"value": 1900, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "SLO Compliance - API Response Time",
+        "type": "gauge",
+        "gridPos": {"x": 0, "y": 34, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "(1 - (count(http_request_duration_seconds{quantile=\"0.95\"} > 0.2) / count(http_request_duration_seconds{quantile=\"0.95\"}))) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 95, "color": "yellow"},
+                {"value": 99, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "SLO Compliance - Uptime",
+        "type": "gauge",
+        "gridPos": {"x": 8, "y": 34, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "(1 - (sum(up == 0) / sum(up))) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 99, "color": "yellow"},
+                {"value": 99.9, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 16,
+        "title": "Error Budget Consumption (30 days)",
+        "type": "bargauge",
+        "gridPos": {"x": 16, "y": 34, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "(1 - (1 - sum(rate(http_requests_total{status=~\"5..\"}[30d])) / sum(rate(http_requests_total[30d])))) / 0.001 * 100",
+            "legendFormat": "Error Budget Used",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 75, "color": "orange"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "namespace",
+          "type": "constant",
+          "current": {"value": "sec-latent", "text": "sec-latent"}
+        },
+        {
+          "name": "interval",
+          "type": "interval",
+          "auto": true,
+          "auto_count": 30,
+          "auto_min": "10s",
+          "options": [
+            {"text": "1m", "value": "1m"},
+            {"text": "5m", "value": "5m"},
+            {"text": "15m", "value": "15m"},
+            {"text": "1h", "value": "1h"}
+          ]
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "changes(kube_deployment_status_observed_generation{namespace=\"sec-latent\"}[5m]) > 0",
+          "iconColor": "blue",
+          "tagKeys": "deployment",
+          "textFormat": "Deployment: {{deployment}}"
+        }
+      ]
+    }
+  }
+}

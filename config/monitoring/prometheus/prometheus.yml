@@ -1,0 +1,153 @@
+# Prometheus Configuration for SEC Latent Monitoring
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'sec-latent-prod'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager:9093
+    timeout: 10s
+    api_version: v2
+
+# Load rules files
+rule_files:
+  - 'alerts/*.yml'
+  - 'recording_rules/*.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+    - targets: ['localhost:9090']
+      labels:
+        component: 'monitoring'
+
+  # Backend API metrics
+  - job_name: 'backend-api'
+    kubernetes_sd_configs:
+    - role: pod
+      namespaces:
+        names:
+        - sec-latent
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_component]
+      action: keep
+      regex: backend
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+    - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+      action: replace
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+      target_label: __address__
+    - source_labels: [__meta_kubernetes_namespace]
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_pod_name]
+      target_label: kubernetes_pod_name
+
+  # Celery worker metrics
+  - job_name: 'celery-workers'
+    kubernetes_sd_configs:
+    - role: pod
+      namespaces:
+        names:
+        - sec-latent
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_component]
+      action: keep
+      regex: worker
+
+  # Redis metrics via redis_exporter
+  - job_name: 'redis'
+    static_configs:
+    - targets: ['redis-exporter:9121']
+      labels:
+        component: 'cache'
+
+  # PostgreSQL metrics via postgres_exporter
+  - job_name: 'postgres'
+    static_configs:
+    - targets: ['postgres-exporter:9187']
+      labels:
+        component: 'database'
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    kubernetes_sd_configs:
+    - role: node
+    relabel_configs:
+    - source_labels: [__address__]
+      regex: '(.*):10250'
+      replacement: '${1}:9100'
+      target_label: __address__
+    - source_labels: [__meta_kubernetes_node_name]
+      target_label: node
+
+  # cAdvisor for container metrics
+  - job_name: 'cadvisor'
+    kubernetes_sd_configs:
+    - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - source_labels: [__address__]
+      regex: '(.*):10250'
+      replacement: '${1}:10250'
+      target_label: __address__
+    - source_labels: [__meta_kubernetes_node_name]
+      target_label: node
+    metric_relabel_configs:
+    - source_labels: [container]
+      regex: ''
+      action: drop
+
+  # Kubernetes API server
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+    - role: endpoints
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+      action: keep
+      regex: default;kubernetes;https
+
+  # Elasticsearch metrics
+  - job_name: 'elasticsearch'
+    static_configs:
+    - targets: ['elasticsearch:9200']
+      labels:
+        component: 'logging'
+
+  # Grafana metrics
+  - job_name: 'grafana'
+    static_configs:
+    - targets: ['grafana:3000']
+      labels:
+        component: 'monitoring'
+
+# Remote write for long-term storage (optional)
+# remote_write:
+#   - url: "https://prometheus-us-central1.grafana.net/api/prom/push"
+#     basic_auth:
+#       username: "your-username"
+#       password: "your-api-key"

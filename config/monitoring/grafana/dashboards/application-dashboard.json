@@ -1,0 +1,116 @@
+{
+  "dashboard": {
+    "title": "SEC Latent - Application Metrics",
+    "tags": ["sec-latent", "application"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "type": "graph",
+        "title": "API Request Rate",
+        "targets": [{
+          "expr": "rate(http_requests_total{job='backend-api'}[5m])",
+          "legendFormat": "{{method}} {{endpoint}}"
+        }],
+        "yaxes": [{"format": "reqps"}, {"format": "short"}]
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "type": "graph",
+        "title": "API Response Time (p95)",
+        "targets": [{
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "{{endpoint}}"
+        }],
+        "yaxes": [{"format": "s"}, {"format": "short"}]
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "type": "graph",
+        "title": "Error Rate",
+        "targets": [{
+          "expr": "rate(http_requests_total{status=~'5..'}[5m]) / rate(http_requests_total[5m])",
+          "legendFormat": "5xx Error Rate"
+        }],
+        "yaxes": [{"format": "percentunit"}, {"format": "short"}]
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "type": "stat",
+        "title": "Active WebSocket Connections",
+        "targets": [{
+          "expr": "websocket_connections_active",
+          "legendFormat": "Active Connections"
+        }],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "type": "graph",
+        "title": "Celery Queue Length",
+        "targets": [{
+          "expr": "celery_queue_length",
+          "legendFormat": "{{queue}}"
+        }],
+        "yaxes": [{"format": "short"}, {"format": "short"}]
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "type": "graph",
+        "title": "Task Processing Rate",
+        "targets": [{
+          "expr": "rate(celery_task_total[5m])",
+          "legendFormat": "{{task}}"
+        }],
+        "yaxes": [{"format": "ops"}, {"format": "short"}]
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "type": "graph",
+        "title": "Cache Hit Rate",
+        "targets": [{
+          "expr": "rate(cache_hits[5m]) / (rate(cache_hits[5m]) + rate(cache_misses[5m]))",
+          "legendFormat": "Hit Rate"
+        }],
+        "yaxes": [{"format": "percentunit"}, {"format": "short"}]
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "type": "graph",
+        "title": "Database Connection Pool",
+        "targets": [
+          {
+            "expr": "database_pool_size",
+            "legendFormat": "Pool Size"
+          },
+          {
+            "expr": "database_pool_available",
+            "legendFormat": "Available"
+          }
+        ],
+        "yaxes": [{"format": "short"}, {"format": "short"}]
+      }
+    ]
+  }
+}

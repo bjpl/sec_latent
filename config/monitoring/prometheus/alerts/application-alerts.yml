@@ -1,0 +1,144 @@
+# Application-level alerts for SEC Latent
+
+groups:
+- name: application_alerts
+  interval: 30s
+  rules:
+  # API Availability
+  - alert: APIDown
+    expr: up{job="backend-api"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: backend
+    annotations:
+      summary: "Backend API is down"
+      description: "Backend API instance {{ $labels.instance }} has been down for more than 2 minutes."
+
+  # High Response Time
+  - alert: HighResponseTime
+    expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+    for: 5m
+    labels:
+      severity: warning
+      component: backend
+    annotations:
+      summary: "High API response time"
+      description: "95th percentile response time is {{ $value }}s (threshold: 2s)"
+
+  # High Error Rate
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+    for: 5m
+    labels:
+      severity: critical
+      component: backend
+    annotations:
+      summary: "High 5xx error rate"
+      description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+  # Celery Worker Down
+  - alert: CeleryWorkerDown
+    expr: up{job="celery-workers"} == 0
+    for: 5m
+    labels:
+      severity: warning
+      component: worker
+    annotations:
+      summary: "Celery worker is down"
+      description: "Worker {{ $labels.instance }} has been down for more than 5 minutes."
+
+  # High Queue Length
+  - alert: HighCeleryQueueLength
+    expr: celery_queue_length > 1000
+    for: 10m
+    labels:
+      severity: warning
+      component: worker
+    annotations:
+      summary: "Celery queue is backing up"
+      description: "Queue {{ $labels.queue }} has {{ $value }} pending tasks (threshold: 1000)"
+
+  # Task Failure Rate
+  - alert: HighTaskFailureRate
+    expr: rate(celery_task_failed_total[10m]) / rate(celery_task_total[10m]) > 0.1
+    for: 15m
+    labels:
+      severity: warning
+      component: worker
+    annotations:
+      summary: "High task failure rate"
+      description: "Task failure rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+
+  # WebSocket Connection Limit
+  - alert: WebSocketConnectionLimitApproaching
+    expr: websocket_connections_active > 1800
+    for: 5m
+    labels:
+      severity: warning
+      component: backend
+    annotations:
+      summary: "WebSocket connections approaching limit"
+      description: "Active WebSocket connections: {{ $value }} (limit: 2000)"
+
+  # Database Connection Pool Exhausted
+  - alert: DatabasePoolExhausted
+    expr: database_pool_size - database_pool_available < 5
+    for: 5m
+    labels:
+      severity: critical
+      component: database
+    annotations:
+      summary: "Database connection pool nearly exhausted"
+      description: "Only {{ $value }} database connections available"
+
+  # Cache Hit Rate Low
+  - alert: LowCacheHitRate
+    expr: rate(cache_hits[5m]) / (rate(cache_hits[5m]) + rate(cache_misses[5m])) < 0.7
+    for: 15m
+    labels:
+      severity: warning
+      component: cache
+    annotations:
+      summary: "Cache hit rate is low"
+      description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 70%)"
+
+  # Memory Usage High
+  - alert: HighMemoryUsage
+    expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Container memory usage is high"
+      description: "Container {{ $labels.container }} memory usage is {{ $value | humanizePercentage }}"
+
+  # CPU Usage High
+  - alert: HighCPUUsage
+    expr: rate(container_cpu_usage_seconds_total[5m]) > 0.9
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Container CPU usage is high"
+      description: "Container {{ $labels.container }} CPU usage is {{ $value | humanizePercentage }}"
+
+  # Disk Space Low
+  - alert: LowDiskSpace
+    expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Disk space is running low"
+      description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} has only {{ $value | humanizePercentage }} free space"
+
+  # SSL Certificate Expiring
+  - alert: SSLCertificateExpiringSoon
+    expr: (ssl_certificate_expiry_seconds - time()) / 86400 < 30
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: "SSL certificate expiring soon"
+      description: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days"

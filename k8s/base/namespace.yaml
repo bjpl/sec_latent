@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sec-latent
+  labels:
+    name: sec-latent
+    environment: base

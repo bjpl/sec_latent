@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sec-latent-data-pvc
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sec-latent-postgres-pvc
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+    component: database
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sec-latent-redis-pvc
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+    component: cache
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 10Gi

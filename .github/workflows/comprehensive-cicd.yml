@@ -1,0 +1,514 @@
+name: Comprehensive CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, staging]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+  schedule:
+    # Run nightly security scans
+    - cron: '0 2 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # Security scanning with comprehensive tools
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Bandit security linter
+        run: |
+          pip install bandit[toml]
+          bandit -r src/ -f json -o bandit-report.json || true
+
+      - name: Run Safety vulnerability scanner
+        run: |
+          pip install safety
+          safety check --json --output safety-report.json || true
+
+      - name: Run npm audit
+        working-directory: ./frontend
+        run: |
+          npm audit --audit-level=moderate --json > npm-audit.json || true
+
+      - name: Scan for secrets with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            trivy-results.sarif
+            bandit-report.json
+            safety-report.json
+            npm-audit.json
+
+  # Backend linting and testing
+  lint-and-test-backend:
+    name: Backend - Lint & Test
+    runs-on: ubuntu-latest
+    needs: security-scan
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run Black formatter check
+        run: black --check src/ tests/
+
+      - name: Run Ruff linter
+        run: ruff check src/ tests/
+
+      - name: Run MyPy type checker
+        run: mypy src/ --ignore-missing-imports
+
+      - name: Run pytest with coverage
+        env:
+          CELERY_BROKER_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/test_db
+        run: |
+          pytest tests/ \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            --junitxml=junit.xml \
+            -v
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: backend
+          name: backend-coverage
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: backend-test-results
+          path: |
+            coverage.xml
+            htmlcov/
+            junit.xml
+
+  # Frontend linting and testing
+  lint-and-test-frontend:
+    name: Frontend - Lint & Test
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Run TypeScript type check
+        working-directory: ./frontend
+        run: npx tsc --noEmit
+
+      - name: Run Jest tests
+        working-directory: ./frontend
+        run: npm test -- --coverage --watchAll=false
+
+      - name: Build Next.js app
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/coverage-final.json
+          flags: frontend
+          name: frontend-coverage
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/.next/
+
+  # Build and scan Docker images
+  build-and-scan-images:
+    name: Build & Scan Images - ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    needs: [lint-and-test-backend, lint-and-test-frontend]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    strategy:
+      matrix:
+        component: [backend, frontend, worker]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.${{ matrix.component }}
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}:${{ github.ref_name }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}:${{ github.ref_name }}
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Push Docker image
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.${{ matrix.component }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+  # Deploy to staging environment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-scan-images
+    if: github.ref == 'refs/heads/staging'
+    environment:
+      name: staging
+      url: https://staging.sec-latent.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -k k8s/overlays/staging/
+          kubectl rollout status deployment/sec-latent-backend -n staging --timeout=5m
+          kubectl rollout status deployment/sec-latent-frontend -n staging --timeout=5m
+          kubectl rollout status deployment/sec-latent-worker -n staging --timeout=5m
+
+      - name: Wait for deployment stabilization
+        run: sleep 30
+
+      - name: Run smoke tests
+        run: |
+          chmod +x ./scripts/health-checks/smoke-test.sh
+          ./scripts/health-checks/smoke-test.sh https://staging.sec-latent.example.com
+
+      - name: Notify Sentry of deployment
+        run: |
+          curl https://sentry.io/api/0/organizations/${{ secrets.SENTRY_ORG }}/releases/ \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SENTRY_AUTH_TOKEN }}" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"version\": \"${{ github.sha }}\",
+              \"refs\": [{
+                \"repository\": \"${{ github.repository }}\",
+                \"commit\": \"${{ github.sha }}\"
+              }],
+              \"projects\": [\"sec-latent\"],
+              \"environment\": \"staging\"
+            }"
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Deploy to production with blue-green strategy
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-scan-images
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://sec-latent.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Create pre-deployment backup
+        run: |
+          chmod +x ./scripts/backup/backup-database.sh
+          ./scripts/backup/backup-database.sh production
+
+      - name: Deploy green environment
+        run: |
+          kubectl apply -k k8s/overlays/prod/
+          kubectl rollout status deployment/sec-latent-backend-green -n production --timeout=10m
+          kubectl rollout status deployment/sec-latent-frontend-green -n production --timeout=10m
+          kubectl rollout status deployment/sec-latent-worker-green -n production --timeout=10m
+
+      - name: Run production smoke tests on green
+        run: |
+          chmod +x ./scripts/health-checks/smoke-test.sh
+          ./scripts/health-checks/smoke-test.sh https://green.sec-latent.example.com
+
+      - name: Run performance tests on green
+        run: |
+          chmod +x ./scripts/health-checks/performance-test.sh
+          ./scripts/health-checks/performance-test.sh https://green.sec-latent.example.com
+
+      - name: Switch traffic to green
+        run: |
+          kubectl patch service sec-latent-backend -n production -p '{"spec":{"selector":{"version":"green"}}}'
+          kubectl patch service sec-latent-frontend -n production -p '{"spec":{"selector":{"version":"green"}}}'
+
+      - name: Monitor deployment for 5 minutes
+        run: |
+          chmod +x ./scripts/health-checks/monitor-deployment.sh
+          ./scripts/health-checks/monitor-deployment.sh production 300
+
+      - name: Verify error rate
+        run: |
+          # Check Prometheus metrics for error rate
+          ERROR_RATE=$(curl -s "http://prometheus:9090/api/v1/query?query=rate(http_requests_total{status=~\"5..\"}[5m])" | jq '.data.result[0].value[1]')
+          if (( $(echo "$ERROR_RATE > 0.05" | bc -l) )); then
+            echo "Error rate too high: $ERROR_RATE"
+            exit 1
+          fi
+
+      - name: Scale down blue environment
+        run: |
+          kubectl scale deployment/sec-latent-backend-blue -n production --replicas=1
+          kubectl scale deployment/sec-latent-frontend-blue -n production --replicas=1
+          kubectl scale deployment/sec-latent-worker-blue -n production --replicas=1
+
+      - name: Notify Sentry of production deployment
+        run: |
+          curl https://sentry.io/api/0/organizations/${{ secrets.SENTRY_ORG }}/releases/ \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SENTRY_AUTH_TOKEN }}" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"version\": \"${{ github.sha }}\",
+              \"refs\": [{
+                \"repository\": \"${{ github.repository }}\",
+                \"commit\": \"${{ github.sha }}\"
+              }],
+              \"projects\": [\"sec-latent\"],
+              \"environment\": \"production\"
+            }"
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Rollback production deployment
+  rollback-production:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: deploy-production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Rollback to blue environment
+        run: |
+          kubectl patch service sec-latent-backend -n production -p '{"spec":{"selector":{"version":"blue"}}}'
+          kubectl patch service sec-latent-frontend -n production -p '{"spec":{"selector":{"version":"blue"}}}'
+          kubectl scale deployment/sec-latent-backend-blue -n production --replicas=3
+          kubectl scale deployment/sec-latent-frontend-blue -n production --replicas=2
+          kubectl scale deployment/sec-latent-worker-blue -n production --replicas=2
+
+      - name: Verify rollback
+        run: |
+          chmod +x ./scripts/health-checks/smoke-test.sh
+          ./scripts/health-checks/smoke-test.sh https://sec-latent.example.com
+
+      - name: Notify Slack of rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: 'warning'
+          text: 'Production deployment rolled back'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Performance testing
+  performance-tests:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/staging'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run load tests
+        run: |
+          k6 run tests/performance/load-test.js \
+            --out json=load-test-results.json \
+            --summary-export=summary.json
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: |
+            load-test-results.json
+            summary.json

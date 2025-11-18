@@ -1,0 +1,136 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "version": "2.0",
+  "services": {
+    "backend": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "docker/Dockerfile.backend",
+        "context": "."
+      },
+      "deploy": {
+        "numReplicas": 2,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "healthcheckPath": "/health",
+        "healthcheckTimeout": 10,
+        "healthcheckInterval": 30,
+        "startCommand": "gunicorn src.api.main:app --bind 0.0.0.0:$PORT --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --keepalive 5 --max-requests 1000 --max-requests-jitter 100"
+      },
+      "resources": {
+        "cpu": 1.0,
+        "memory": 2048
+      },
+      "autoscaling": {
+        "enabled": true,
+        "minReplicas": 2,
+        "maxReplicas": 6,
+        "targetCPUUtilizationPercentage": 70,
+        "targetMemoryUtilizationPercentage": 80
+      },
+      "variables": {
+        "ENVIRONMENT": "production",
+        "DEBUG": "false",
+        "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
+        "REDIS_URL": "${{Redis.REDIS_URL}}",
+        "CELERY_BROKER_URL": "${{Redis.REDIS_URL}}/0",
+        "CELERY_RESULT_BACKEND": "${{Redis.REDIS_URL}}/0",
+        "LOG_LEVEL": "INFO",
+        "ENABLE_METRICS": "true",
+        "METRICS_PORT": "8000"
+      }
+    },
+    "frontend": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "docker/Dockerfile.frontend",
+        "context": "."
+      },
+      "deploy": {
+        "numReplicas": 2,
+        "restartPolicyType": "ON_FAILURE",
+        "healthcheckPath": "/api/health",
+        "healthcheckTimeout": 10,
+        "healthcheckInterval": 30,
+        "startCommand": "npm start"
+      },
+      "resources": {
+        "cpu": 0.5,
+        "memory": 512
+      },
+      "autoscaling": {
+        "enabled": true,
+        "minReplicas": 2,
+        "maxReplicas": 4,
+        "targetCPUUtilizationPercentage": 70
+      },
+      "variables": {
+        "NODE_ENV": "production",
+        "NEXT_PUBLIC_API_URL": "${{backend.url}}"
+      }
+    },
+    "worker": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "docker/Dockerfile.worker",
+        "context": "."
+      },
+      "deploy": {
+        "numReplicas": 2,
+        "restartPolicyType": "ON_FAILURE",
+        "startCommand": "celery -A src.pipeline.celery_tasks worker --loglevel=info --concurrency=4 --max-tasks-per-child=100"
+      },
+      "resources": {
+        "cpu": 2.0,
+        "memory": 4096
+      },
+      "autoscaling": {
+        "enabled": true,
+        "minReplicas": 2,
+        "maxReplicas": 8,
+        "targetCPUUtilizationPercentage": 70,
+        "targetMemoryUtilizationPercentage": 80
+      },
+      "variables": {
+        "ENVIRONMENT": "production",
+        "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
+        "REDIS_URL": "${{Redis.REDIS_URL}}",
+        "CELERY_BROKER_URL": "${{Redis.REDIS_URL}}/0",
+        "CELERY_RESULT_BACKEND": "${{Redis.REDIS_URL}}/0",
+        "CELERY_WORKER_CONCURRENCY": "4",
+        "LOG_LEVEL": "INFO"
+      }
+    },
+    "beat": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "docker/Dockerfile.worker",
+        "context": "."
+      },
+      "deploy": {
+        "numReplicas": 1,
+        "restartPolicyType": "ON_FAILURE",
+        "startCommand": "celery -A src.pipeline.celery_tasks beat --loglevel=info"
+      },
+      "resources": {
+        "cpu": 0.25,
+        "memory": 256
+      },
+      "variables": {
+        "CELERY_BROKER_URL": "${{Redis.REDIS_URL}}/0",
+        "CELERY_RESULT_BACKEND": "${{Redis.REDIS_URL}}/0",
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  },
+  "plugins": {
+    "postgres": {
+      "plan": "pro",
+      "version": "15"
+    },
+    "redis": {
+      "plan": "hobby",
+      "version": "7"
+    }
+  }
+}

@@ -1,0 +1,269 @@
+---
+# Horizontal Pod Autoscaler for Backend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sec-latent-backend-hpa
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+    component: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sec-latent-backend
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70  # Scale up when CPU > 70%
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80  # Scale up when memory > 80%
+  # Custom metrics: Request rate
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"  # Scale up when > 100 req/s per pod
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60  # Wait 60s before scaling up
+      policies:
+      - type: Percent
+        value: 50  # Scale up by 50% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 2  # Or add 2 pods at a time (whichever is smaller)
+        periodSeconds: 60
+      selectPolicy: Max  # Use the policy that scales faster
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 minutes before scaling down
+      policies:
+      - type: Percent
+        value: 10  # Scale down by 10% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 1  # Or remove 1 pod at a time
+        periodSeconds: 60
+      selectPolicy: Min  # Use the policy that scales slower (more conservative)
+
+---
+# Horizontal Pod Autoscaler for Workers (Celery)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sec-latent-worker-hpa
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+    component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sec-latent-worker
+  minReplicas: 2
+  maxReplicas: 15
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  # Custom metrics: Celery queue length
+  - type: External
+    external:
+      metric:
+        name: celery_queue_length
+        selector:
+          matchLabels:
+            queue_name: sec_analysis
+      target:
+        type: AverageValue
+        averageValue: "50"  # Scale up when > 50 tasks per worker in queue
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30  # Scale workers faster
+      policies:
+      - type: Percent
+        value: 100  # Double workers if needed
+        periodSeconds: 60
+      - type: Pods
+        value: 3  # Or add 3 workers
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Wait 10 minutes (longer for workers)
+      policies:
+      - type: Pods
+        value: 1  # Remove 1 worker at a time
+        periodSeconds: 120
+      selectPolicy: Min
+
+---
+# Horizontal Pod Autoscaler for Frontend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sec-latent-frontend-hpa
+  namespace: sec-latent
+  labels:
+    app: sec-latent
+    component: frontend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sec-latent-frontend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 90
+      selectPolicy: Min
+
+---
+# PodDisruptionBudget for Backend (High Availability)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sec-latent-backend-pdb
+  namespace: sec-latent
+spec:
+  minAvailable: 2  # Always keep at least 2 backend pods running
+  selector:
+    matchLabels:
+      app: sec-latent
+      component: backend
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# PodDisruptionBudget for Workers
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sec-latent-worker-pdb
+  namespace: sec-latent
+spec:
+  minAvailable: 1  # Always keep at least 1 worker running
+  selector:
+    matchLabels:
+      app: sec-latent
+      component: worker
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# VerticalPodAutoscaler (VPA) for Backend - Optional
+# Provides resource recommendation, can be used alongside HPA
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sec-latent-backend-vpa
+  namespace: sec-latent
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sec-latent-backend
+  updatePolicy:
+    updateMode: "Off"  # Recommendation only, don't auto-update
+  resourcePolicy:
+    containerPolicies:
+    - containerName: backend
+      minAllowed:
+        cpu: 250m
+        memory: 512Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      controlledResources: ["cpu", "memory"]
+
+---
+# Custom Metrics Adapter Configuration (Prometheus)
+# Required for custom metrics in HPA
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adapter-config
+  namespace: custom-metrics
+data:
+  config.yaml: |
+    rules:
+    - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total"
+        as: "${1}_per_second"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'
+
+    - seriesQuery: 'celery_queue_length{namespace!="",queue!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          queue: {group: "queue"}
+      name:
+        matches: "^(.*)$"
+        as: "${1}"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    - seriesQuery: 'api_response_time_seconds{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_seconds"
+        as: "${1}_milliseconds"
+      metricsQuery: 'histogram_quantile(0.95, sum(rate(<<.Series>>_bucket{<<.LabelMatchers>>}[5m])) by (le, <<.GroupBy>>)) * 1000'

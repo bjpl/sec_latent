@@ -1,0 +1,134 @@
+# Validation Framework Configuration
+
+# FACT Framework Settings
+fact:
+  # Model assignments
+  models:
+    mathematical: "qwen2.5-coder"
+    logical: "deepseek-r1"
+    critical: "claude-3.5"
+
+  # Confidence thresholds
+  thresholds:
+    overall_confidence: 0.85
+    mathematical_confidence: 0.90
+    logical_confidence: 0.80
+    critical_confidence: 0.85
+
+  # Validation settings
+  validation:
+    enable_mathematical: true
+    enable_logical: true
+    enable_critical: true
+    strict_mode: false
+
+  # Severity settings
+  severity_levels:
+    critical_threshold: 0.70
+    high_threshold: 0.60
+    medium_threshold: 0.75
+    low_threshold: 0.85
+
+# GOALIE Protection Settings
+goalie:
+  # Risk thresholds
+  thresholds:
+    risk_threshold: 0.70
+    confidence_threshold: 0.80
+    min_model_agreement: 0.75
+    max_variance: 0.20
+
+  # Risk category base scores
+  risk_categories:
+    financial_forecast: 0.80
+    market_prediction: 0.85
+    company_valuation: 0.75
+    regulatory_compliance: 0.90
+    competitive_analysis: 0.60
+    general_analysis: 0.40
+
+  # Adjustment factors by risk level
+  adjustment_factors:
+    critical: 0.60
+    high: 0.75
+    moderate: 0.90
+    low: 0.95
+    minimal: 1.00
+
+  # Display rules
+  display_rules:
+    hide_critical_low_confidence: true
+    hide_unreliable: true
+    hide_high_variance: true
+    max_variance_threshold: 0.30
+
+# Validation Metrics Settings
+metrics:
+  # Quality thresholds
+  thresholds:
+    min_accuracy: 0.85
+    min_precision: 0.80
+    min_recall: 0.75
+    max_false_positive_rate: 0.10
+    max_false_negative_rate: 0.15
+    min_confidence: 0.80
+    min_model_agreement: 0.75
+
+  # Tracking settings
+  tracking:
+    enable_tracking: true
+    history_window: 100
+    trend_window: 10
+    degradation_threshold: 0.05
+    export_interval: 1000
+
+  # Calibration settings
+  calibration:
+    enable_calibration: true
+    confidence_bins: [0.0, 0.5, 0.7, 0.8, 0.9, 1.0]
+    calibration_threshold: 0.80
+
+# Integration Settings
+integration:
+  # Pipeline settings
+  pipeline:
+    enable_fact: true
+    enable_goalie: true
+    enable_metrics: true
+    parallel_validation: false
+
+  # Logging settings
+  logging:
+    level: "INFO"
+    enable_fact_logs: true
+    enable_goalie_logs: true
+    enable_metrics_logs: true
+    log_file: "logs/validation.log"
+
+  # Performance settings
+  performance:
+    batch_size: 10
+    timeout_seconds: 30
+    max_retries: 3
+    cache_results: true
+
+# Testing Settings
+testing:
+  # Test execution
+  execution:
+    run_unit_tests: true
+    run_integration_tests: true
+    run_performance_tests: false
+    parallel_execution: true
+
+  # Test thresholds
+  thresholds:
+    min_test_coverage: 0.80
+    max_test_duration: 60
+    performance_baseline: 100
+
+  # Mock settings
+  mocks:
+    enable_model_mocks: true
+    mock_delay_ms: 100
+    mock_failure_rate: 0.0

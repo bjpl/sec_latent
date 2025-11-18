@@ -1,0 +1,83 @@
+# Multi-stage Docker build for Celery workers
+# Optimized for background task processing
+
+# Stage 1: Builder
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy requirements
+COPY requirements.txt /tmp/
+COPY requirements-prod.txt /tmp/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements-prod.txt
+
+# Stage 2: Runtime
+FROM python:3.11-slim
+
+# Build arguments
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+
+# Labels
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.title="SEC Latent Worker" \
+      org.opencontainers.image.description="Celery worker for background tasks"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r worker && useradd -r -g worker -u 1000 worker
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=worker:worker src/ /app/src/
+COPY --chown=worker:worker config/ /app/config/
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs && \
+    chown -R worker:worker /app
+
+# Switch to non-root user
+USER worker
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    C_FORCE_ROOT=false
+
+# Health check
+HEALTHCHECK --interval=60s --timeout=30s --start-period=60s --retries=3 \
+    CMD celery -A src.pipeline.celery_tasks inspect ping -d celery@$HOSTNAME || exit 1
+
+# Run Celery worker
+CMD ["celery", "-A", "src.pipeline.celery_tasks", "worker", \
+     "--loglevel=info", \
+     "--concurrency=4", \
+     "--max-tasks-per-child=1000", \
+     "--task-events", \
+     "--without-gossip", \
+     "--without-mingle"]

@@ -1,0 +1,464 @@
+# Load Balancer and CDN Optimization Configuration
+
+---
+# NGINX Ingress Controller Optimization
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-ingress-config
+  namespace: ingress-nginx
+data:
+  # Connection settings
+  keep-alive-requests: "10000"  # Max requests per connection
+  upstream-keepalive-connections: "100"  # Upstream connection pooling
+  upstream-keepalive-timeout: "60"  # Keep connections alive for 60s
+  upstream-keepalive-requests: "1000"
+
+  # Performance tuning
+  worker-processes: "auto"  # Auto-detect CPU cores
+  worker-connections: "16384"  # Max connections per worker
+  max-worker-connections: "16384"
+  max-worker-open-files: "65536"
+
+  # Timeouts
+  client-body-timeout: "60"
+  client-header-timeout: "60"
+  keep-alive: "75"
+  send-timeout: "60"
+
+  # Buffering
+  proxy-buffer-size: "16k"
+  proxy-buffers-number: "8"
+  proxy-busy-buffers-size: "32k"
+  client-body-buffer-size: "128k"
+  client-max-body-size: "10m"
+
+  # Compression
+  enable-brotli: "true"
+  brotli-level: "5"
+  brotli-types: "application/json application/javascript text/css text/html text/plain text/xml"
+  use-gzip: "true"
+  gzip-level: "5"
+  gzip-types: "application/json application/javascript text/css text/html text/plain text/xml"
+
+  # SSL optimization
+  ssl-protocols: "TLSv1.2 TLSv1.3"
+  ssl-ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+  ssl-prefer-server-ciphers: "true"
+  ssl-session-cache: "shared:SSL:50m"
+  ssl-session-timeout: "1h"
+  ssl-session-tickets: "false"  # Disable for better forward secrecy
+
+  # Rate limiting
+  limit-req-status-code: "429"
+  limit-conn-zone-variable: "$binary_remote_addr"
+
+  # Access logging (optimized for performance)
+  access-log-path: "/var/log/nginx/access.log"
+  log-format-upstream: '{"time": "$time_iso8601", "remote_addr": "$remote_addr", "request": "$request", "status": $status, "body_bytes_sent": $body_bytes_sent, "request_time": $request_time, "upstream_response_time": "$upstream_response_time"}'
+
+  # Error handling
+  custom-http-errors: "404,503"
+  default-backend-service: "sec-latent/default-backend"
+
+---
+# Enhanced Ingress Configuration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sec-latent-ingress
+  namespace: sec-latent
+  annotations:
+    # Performance optimizations
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffering: "on"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+    # Connection pooling
+    nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "60"
+    nginx.ingress.kubernetes.io/upstream-keepalive-requests: "1000"
+
+    # Compression
+    nginx.ingress.kubernetes.io/enable-brotli: "true"
+    nginx.ingress.kubernetes.io/brotli-level: "5"
+    nginx.ingress.kubernetes.io/brotli-types: "application/json,application/javascript,text/css,text/html"
+
+    # SSL/TLS optimization
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"  # Per IP
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-whitelist: "10.0.0.0/8"  # Internal network
+
+    # Caching (for CDN integration)
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Cache-Status $upstream_cache_status;
+      add_header Cache-Control "public, max-age=3600" always;
+
+    # Security headers
+    nginx.ingress.kubernetes.io/server-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Session affinity for WebSocket
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "sec-latent-session"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "10800"  # 3 hours
+    nginx.ingress.kubernetes.io/session-cookie-expires: "10800"
+
+    # CORS (handled by application, but can be enforced here)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"  # Configure in production
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.sec-filing-analyzer.com
+    - www.sec-filing-analyzer.com
+    secretName: sec-latent-tls
+  rules:
+  - host: api.sec-filing-analyzer.com
+    http:
+      paths:
+      # API endpoints
+      - path: /api/v1
+        pathType: Prefix
+        backend:
+          service:
+            name: sec-latent-backend
+            port:
+              number: 8000
+      # WebSocket endpoints
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: sec-latent-backend
+            port:
+              number: 8000
+      # Health check (bypass rate limiting)
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: sec-latent-backend
+            port:
+              number: 8000
+  - host: www.sec-filing-analyzer.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sec-latent-frontend
+            port:
+              number: 3000
+
+---
+# CDN Configuration (Cloudflare)
+# This is a reference configuration - actual implementation via Cloudflare dashboard/API
+
+CDN_CONFIG:
+  provider: cloudflare
+  zone: sec-filing-analyzer.com
+
+  # Caching rules
+  caching:
+    # Static assets - Long TTL
+    - pattern: "*.js"
+      ttl: 31536000  # 1 year
+      cache_level: "aggressive"
+      edge_cache_ttl: 31536000
+
+    - pattern: "*.css"
+      ttl: 31536000
+      cache_level: "aggressive"
+      edge_cache_ttl: 31536000
+
+    - pattern: "*.png|*.jpg|*.jpeg|*.gif|*.svg"
+      ttl: 31536000
+      cache_level: "aggressive"
+      edge_cache_ttl: 31536000
+
+    # API responses - Short TTL with cache key customization
+    - pattern: "/api/v1/filings*"
+      ttl: 3600  # 1 hour
+      cache_level: "standard"
+      edge_cache_ttl: 3600
+      cache_key: "url+headers:authorization"  # Include auth in cache key
+      bypass_cache_on_cookie: "session_id"
+
+    - pattern: "/api/v1/predictions*"
+      ttl: 1800  # 30 minutes
+      cache_level: "standard"
+      edge_cache_ttl: 1800
+
+    - pattern: "/api/v1/signals*"
+      ttl: 3600
+      cache_level: "standard"
+      edge_cache_ttl: 3600
+
+    # Real-time data - Very short TTL
+    - pattern: "/api/v1/market*"
+      ttl: 300  # 5 minutes
+      cache_level: "bypass"  # Don't cache at edge, only browser
+
+    # WebSocket - No caching
+    - pattern: "/ws/*"
+      cache_level: "bypass"
+
+  # Performance optimizations
+  performance:
+    minify:
+      html: true
+      css: true
+      js: true
+
+    auto_minify:
+      enabled: true
+
+    rocket_loader: false  # Disable for API, can enable for frontend
+
+    mirage:
+      enabled: true  # Image optimization
+
+    polish:
+      enabled: true
+      webp: true
+      avif: true
+
+    brotli: true
+
+    http2: true
+    http3: true  # Enable QUIC
+
+    early_hints: true  # HTTP 103 Early Hints for faster page loads
+
+  # Security
+  security:
+    ssl_mode: "full_strict"
+    min_tls_version: "1.2"
+    tls_1_3: true
+    automatic_https_rewrites: true
+    always_use_https: true
+
+    # DDoS protection
+    ddos_protection:
+      enabled: true
+      sensitivity: "high"
+
+    # Rate limiting (application-level)
+    rate_limiting:
+      - rule: "api_requests"
+        threshold: 100  # requests
+        period: 60  # seconds
+        action: "challenge"  # or "block"
+        match:
+          url_pattern: "/api/v1/*"
+
+    # Bot management
+    bot_fight_mode: true
+    challenge_passage: 300  # 5 minutes
+
+    # WAF rules
+    waf:
+      enabled: true
+      mode: "on"
+      sensitivity: "medium"
+
+  # Geographic optimization
+  geo:
+    # Argo Smart Routing (premium feature)
+    argo:
+      enabled: true
+      tiered_caching: true
+
+    # Load balancing across regions
+    load_balancing:
+      enabled: true
+      pools:
+        - name: "us-east"
+          origin: "us-east-lb.sec-filing-analyzer.com"
+          weight: 60
+          health_check: true
+        - name: "us-west"
+          origin: "us-west-lb.sec-filing-analyzer.com"
+          weight: 40
+          health_check: true
+
+      geo_steering:
+        enabled: true
+        policy: "proximity"  # Route to nearest pool
+
+      session_affinity: true
+      session_affinity_ttl: 3600
+
+  # Monitoring and analytics
+  analytics:
+    web_analytics: true
+
+    # Custom logs for performance analysis
+    logpush:
+      enabled: true
+      destination: "s3://sec-latent-logs/cloudflare/"
+      fields:
+        - ClientRequestHost
+        - ClientRequestURI
+        - EdgeResponseStatus
+        - EdgeResponseBytes
+        - CacheResponseStatus
+        - EdgeStartTimestamp
+        - EdgeEndTimestamp
+        - OriginResponseTime
+
+---
+# Load Balancer Service Configuration
+apiVersion: v1
+kind: Service
+metadata:
+  name: sec-latent-backend
+  namespace: sec-latent
+  annotations:
+    # AWS NLB annotations (if using AWS)
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "60"
+
+    # Health check configuration
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+
+    # Connection draining
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "30"
+
+    # GCP LB annotations (if using GCP)
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "backend-config"}'
+
+spec:
+  type: LoadBalancer
+  sessionAffinity: ClientIP  # For WebSocket connections
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: sec-latent
+    component: backend
+
+---
+# Backend Config for GCP Load Balancer
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: backend-config
+  namespace: sec-latent
+spec:
+  # Connection draining
+  connectionDraining:
+    drainingTimeoutSec: 30
+
+  # Session affinity
+  sessionAffinity:
+    affinityType: "CLIENT_IP"
+    affinityCookieTtlSec: 10800
+
+  # Health check
+  healthCheck:
+    checkIntervalSec: 10
+    timeoutSec: 5
+    healthyThreshold: 2
+    unhealthyThreshold: 2
+    type: HTTP
+    requestPath: /health
+    port: 8000
+
+  # Timeout
+  timeoutSec: 60
+
+  # CDN
+  cdn:
+    enabled: true
+    cachePolicy:
+      includeHost: true
+      includeProtocol: true
+      includeQueryString: true
+    negativeCaching: true
+    negativeCachingPolicy:
+      - code: 404
+        ttl: 120
+      - code: 500
+        ttl: 0
+
+---
+# Performance Monitoring via ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-ingress-monitor
+  namespace: ingress-nginx
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+# Prometheus Rules for Load Balancer Alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: load-balancer-alerts
+  namespace: sec-latent
+spec:
+  groups:
+  - name: load_balancer
+    interval: 30s
+    rules:
+    - alert: HighResponseTime
+      expr: histogram_quantile(0.95, nginx_ingress_controller_request_duration_seconds_bucket) > 0.5
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High response time at load balancer"
+        description: "P95 response time is {{ $value }}s"
+
+    - alert: HighErrorRate
+      expr: sum(rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) / sum(rate(nginx_ingress_controller_requests[5m])) > 0.01
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High error rate at load balancer"
+        description: "Error rate is {{ $value | humanizePercentage }}"

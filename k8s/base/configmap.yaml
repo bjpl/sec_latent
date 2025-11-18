@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sec-latent-config
+  namespace: sec-latent
+data:
+  environment: "production"
+  api-url: "https://api.sec-latent.example.com"
+  sec-user-agent: "SEC-Latent/1.0 (contact@example.com)"
+  log-level: "INFO"
+  metrics-port: "8000"
+  redis-max-connections: "50"
+  celery-worker-concurrency: "4"
+  celery-rate-limit: "100/m"

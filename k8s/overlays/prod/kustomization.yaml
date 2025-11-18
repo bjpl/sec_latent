@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sec-latent
+
+bases:
+- ../../base
+
+namePrefix: prod-
+
+commonLabels:
+  environment: production
+  managed-by: kustomize
+
+replicas:
+- name: sec-latent-backend
+  count: 3
+- name: sec-latent-frontend
+  count: 2
+- name: sec-latent-worker
+  count: 2
+
+images:
+- name: ghcr.io/your-org/sec-latent-backend
+  newTag: v1.0.0
+- name: ghcr.io/your-org/sec-latent-frontend
+  newTag: v1.0.0
+- name: ghcr.io/your-org/sec-latent-worker
+  newTag: v1.0.0
+
+configMapGenerator:
+- name: sec-latent-config
+  behavior: merge
+  literals:
+  - environment=production
+  - log-level=INFO
+  - metrics-port=8000
+
+patches:
+- path: resource-limits-prod.yaml
+- path: hpa-prod.yaml

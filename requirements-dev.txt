@@ -1,0 +1,38 @@
+# Development Dependencies for SEC Latent Application
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-xdist==3.5.0  # Parallel test execution
+httpx==0.25.2  # For async testing
+
+# Code Quality
+black==23.12.1
+ruff==0.1.8
+mypy==1.7.1
+isort==5.13.2
+pylint==3.0.3
+
+# Security Scanning
+bandit[toml]==1.7.5
+safety==2.3.5
+
+# Performance Testing
+locust==2.19.1
+pytest-benchmark==4.0.0
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.5.2
+mkdocstrings[python]==0.24.0
+
+# Development Tools
+ipython==8.18.1
+ipdb==0.13.13
+watchdog==3.0.0  # File watching for auto-reload
+
+# Type Stubs
+types-redis==4.6.0.11
+types-requests==2.31.0.10
